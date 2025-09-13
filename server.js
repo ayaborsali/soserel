@@ -1,44 +1,109 @@
-const express = require('express');
-const nodemailer = require('nodemailer');
-const cors = require('cors');
+// server.js
+const express = require("express");
+const cors = require("cors");
+const admin = require("firebase-admin");
+const tf = require("@tensorflow/tfjs-node");
+const path = require("path");
+
+const serviceAccount = require("./serviceAccountKey.json");
 
 const app = express();
 const PORT = 3001;
 
-app.use(cors());
-app.use(express.json()); // pour parser le JSON dans les requêtes
+app.use(cors({ origin: "http://localhost:3000" }));
+app.use(express.json());
 
-// Configure nodemailer avec ton compte Gmail (à remplacer par tes infos)
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: 'ton.email@gmail.com',            
-    pass: 'ton_mot_de_passe_app_google',      },
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
 });
 
-console.log('Serveur mail démarré sur le port', PORT);
+const db = admin.firestore();
 
-// Route pour envoyer le mail de réinitialisation
-app.post('/send-reset-email', async (req, res) => {
-  const { email, token } = req.body;
-  console.log('Requête reçue avec email:', email, 'token:', token);
+// ------------------ Routes existantes ------------------
 
+// Test API
+app.get("/", (req, res) => {
+  res.send("API fonctionne ✅");
+});
+
+// Ajouter poste, ligne, device...
+// (copier ici toutes tes routes existantes /addpost, /addline, /adddevice, /devices, etc.)
+
+// ------------------ Chargement modèle TensorFlow ------------------
+let model;
+const loadModel = async () => {
   try {
-    await transporter.sendMail({
-      from: 'ton.email@gmail.com',
-      to: email,
-      subject: 'Réinitialisation de votre mot de passe',
-      text: `Voici votre code : ${token}`,
-    });
-    console.log('Email envoyé avec succès');
-    res.status(200).json({ message: 'Email envoyé' });
-  } catch (error) {
-    console.error('Erreur lors de l\'envoi du mail:', error);
-    res.status(500).json({ message: 'Erreur lors de l\'envoi du mail' });
+    model = await tf.loadLayersModel(`file://${path.join(__dirname, "model/model.json")}`);
+    console.log("Modèle TensorFlow chargé ✅");
+  } catch (err) {
+    console.error("Erreur chargement modèle:", err);
+  }
+};
+loadModel();
+
+// ------------------ Route prédiction ------------------
+app.get("/predict/:lampId", async (req, res) => {
+  try {
+    const lampId = req.params.lampId;
+
+    // 🔹 Récupérer l'historique du device
+    const historySnap = await db.collection("history")
+      .where("deviceId", "==", lampId)
+      .orderBy("timestamp", "desc")
+      .limit(50)
+      .get();
+
+    if (historySnap.empty) return res.status(404).json({ message: "Device non trouvé ❌" });
+
+    const historyData = historySnap.docs.map(doc => doc.data());
+
+    // 🔹 Récupérer les alertes du poste associé
+    const deviceSnap = await db.collection("devices").where("name", "==", lampId).limit(1).get();
+    if (deviceSnap.empty) return res.status(404).json({ message: "Device non trouvé ❌" });
+    const posteId = deviceSnap.docs[0].data().posteId;
+
+    const alertsSnap = await db.collection("alerts")
+      .where("postId", "==", posteId)
+      .orderBy("createdAt", "desc")
+      .limit(50)
+      .get();
+
+    const alertsData = alertsSnap.docs.map(doc => doc.data());
+
+    // 🔹 Préparer les features pour le modèle ML
+    const features = historyData.map(h => [
+      parseFloat(h.electricalData?.L1?.current?.value || 0),
+      parseFloat(h.electricalData?.L2?.current?.value || 0),
+      parseFloat(h.electricalData?.L3?.current?.value || 0),
+      parseFloat(h.electricalData?.L1?.voltage?.value || 0),
+      parseFloat(h.electricalData?.L2?.voltage?.value || 0),
+      parseFloat(h.electricalData?.L3?.voltage?.value || 0),
+      parseFloat(h.localData?.temperature || 0),
+      parseFloat(h.localData?.humidity || 0),
+      alertsData.filter(a => a.severity === "High").length,
+    ]);
+
+    if (!model) return res.status(500).json({ message: "Modèle non chargé ❌" });
+
+    // 🔹 Convertir features en Tensor et prédire
+    const inputTensor = tf.tensor2d(features);
+    const predictionTensor = model.predict(inputTensor);
+    const predictionArray = predictionTensor.arraySync();
+
+    // 🔹 Pour simplifier, on prend la moyenne des prédictions
+    const avgPrediction = predictionArray.reduce((sum, p) => sum + p[0], 0) / predictionArray.length;
+
+    // 🔹 Etat final
+    const prediction = avgPrediction > 0.5 ? "Faulty" : "Healthy";
+
+    res.json({ lampId, prediction, avgPrediction, featuresCount: features.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur prédiction ❌", error: err.message });
   }
 });
 
-// Démarrer le serveur
+// ------------------ Lancer serveur ------------------
 app.listen(PORT, () => {
-  console.log(`Serveur démarré sur le port ${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });

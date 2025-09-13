@@ -1,0 +1,53 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "Tunis" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [10.15, 36.85],
+            [10.25, 36.85],
+            [10.25, 36.9],
+            [10.15, 36.9],
+            [10.15, 36.85]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Ariana" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [10.1, 36.85],
+            [10.15, 36.85],
+            [10.15, 36.9],
+            [10.1, 36.9],
+            [10.1, 36.85]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Ben Arous" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [10.15, 36.8],
+            [10.25, 36.8],
+            [10.25, 36.85],
+            [10.15, 36.85],
+            [10.15, 36.8]
+          ]
+        ]
+      }
+    }
+  ]
+}
